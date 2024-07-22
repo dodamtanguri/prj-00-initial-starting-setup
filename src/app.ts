@@ -16,17 +16,26 @@ class Project {
 
 //Project State Management
 //Listener 함수가 리턴하는 값에 신경쓰지 않음.
-type Listener = (items: Project[]) => void;
+// Project State Management
+type Listener<T> = (items: T[]) => void;
+
+class State<T> {
+  protected listeners: Listener<T>[] = [];
+
+  addListener(listenerFn: Listener<T>) {
+    this.listeners.push(listenerFn);
+  }
+}
 
 
-class ProjectState {
+class ProjectState extends State<Project> {
     //함수 참조 
-    private listeners: Listener[] = [];
+
     private projects :Project[] = [];
 
     private static instance: ProjectState;
-    private  constructor() {
-
+    private constructor() {
+        super();
     }
 
     static getInstance() {
@@ -37,9 +46,7 @@ class ProjectState {
         return this.instance;
     }
 
-    addListener(listenerFn: Listener) {
-        this.listeners.push(listenerFn);
-      }
+
     addProject(title: string, description: string, numOfPeople: number) {
             const newProject = new Project(
               Math.random().toString(),
@@ -116,42 +123,79 @@ function autobind(_ : any, _2: string, descriptor: PropertyDescriptor){
     return adjDescriptor;
 } 
 
-//ProjectList Class 
-class ProjectList {
+// Component Base Class
+// 렌더링할 수 있는 객체 
+//<T extends HTMLElement, U extends HTMLElement> : 제네릭 클래스 만들기 >> 상속받을때마다 구체적인 타입을 지정할 수 있음. 
+//abstract >> 직접 인스턴스화 하지 않고 항상 상속을 위해 사용하기 때문에 abstract class 로 선언. 
+abstract class Component<T extends HTMLElement, U extends HTMLElement> {
     templateElement: HTMLTemplateElement;
-    hostElement: HTMLDivElement;
-    element: HTMLElement;
-    assignedProjects: Project[];
+    //제네릭 클래스이용해서 상속을 받을 때 구체적인 타입을 설정할 수 있음 
+    hostElement: T;
+    element: U;
   
-    constructor(private type: 'active' | 'finished') {
+    constructor(
+      templateId: string,
+      hostElementId: string,
+      insertAtStart: boolean,
+      newElementId?: string
+    ) {
       this.templateElement = document.getElementById(
-        'project-list'
+        templateId
       )! as HTMLTemplateElement;
-      this.hostElement = document.getElementById('app')! as HTMLDivElement;
-      this.assignedProjects = [];
+      this.hostElement = document.getElementById(hostElementId)! as T;
   
       const importedNode = document.importNode(
         this.templateElement.content,
         true
       );
-      this.element = importedNode.firstElementChild as HTMLElement;
-      this.element.id = `${this.type}-projects`;
+      this.element = importedNode.firstElementChild as U;
+      if (newElementId) {
+        this.element.id = newElementId;
+      }
   
-      projectState.addListener((projects: Project[]) => {
-        //프로젝트 filter
-        const relevantProjects = projects.filter(prj => {
-            if (this.type === 'active') {
-              return prj.status === ProjectStatus.Active;
-            }
-            return prj.status === ProjectStatus.Finished;
-          });
-        this.assignedProjects = relevantProjects;
-        this.renderProjects();
-      });
-  
-      this.attach();
-      this.renderContent();
+      this.attach(insertAtStart);
     }
+  
+    private attach(insertAtBeginning: boolean) {
+      this.hostElement.insertAdjacentElement(
+        insertAtBeginning ? 'afterbegin' : 'beforeend',
+        this.element
+      );
+    }
+    //Component로 부터 상속받은 모든 클래스가 이 두 메소드를 추가하고 제공하도록 강제
+    abstract configure(): void;
+    abstract renderContent(): void;
+  }
+
+
+//ProjectList Class 
+class ProjectList extends Component<HTMLDivElement, HTMLElement>{
+
+    assignedProjects: Project[];
+  
+    constructor(private type: 'active' | 'finished') {
+        super('project-list','app',false, `${type}-projects`);
+        this.assignedProjects = [];
+
+        this.configure();
+        this.renderContent();
+    
+    }
+
+    configure() {
+        projectState.addListener((projects: Project[]) => {
+            //프로젝트 filter
+            const relevantProjects = projects.filter(prj => {
+                if (this.type === 'active') {
+                  return prj.status === ProjectStatus.Active;
+                }
+                return prj.status === ProjectStatus.Finished;
+              });
+            this.assignedProjects = relevantProjects;
+            this.renderProjects();
+          });
+    }
+    
   
     private renderProjects() {
         const listEl = document.getElementById(
@@ -165,44 +209,40 @@ class ProjectList {
           listEl.appendChild(listItem);
         }
       }
-  
-    private renderContent() {
+      //typescript에서 private abstract로 선언될 수 없기 때문에 private 선언자 지워줌 
+     renderContent() {
       const listId = `${this.type}-projects-list`;
       this.element.querySelector('ul')!.id = listId;
       this.element.querySelector('h2')!.textContent =
         this.type.toUpperCase() + ' PROJECTS';
     }
   
-    private attach() {
-      this.hostElement.insertAdjacentElement('beforeend', this.element);
-    }
   }
   
 
 
 //ProjectInput Class
-class ProjectInput {
-    templateElement: HTMLTemplateElement;
-    hostElement: HTMLDivElement;
-    element: HTMLFormElement;
+class ProjectInput extends Component<HTMLDivElement,HTMLFormElement >{
+
     titleInputElement : HTMLInputElement;
     descriptionInputElement : HTMLInputElement;
     peopleInputElement : HTMLInputElement;
     constructor() {
-        this.templateElement = document.getElementById('project-input')! as HTMLTemplateElement;
-        this.hostElement = document.getElementById('app')! as HTMLDivElement;
-
-        const importedNode = document.importNode(this.templateElement.content, true);
-        this.element = importedNode.firstElementChild as HTMLFormElement;
-        this.element.id = 'user-input'
-
+        super('project-input','app', true, 'user-input');
         this.titleInputElement = this.element.querySelector('#title') as HTMLInputElement;
         this.descriptionInputElement = this.element.querySelector('#description') as HTMLInputElement;
         this.peopleInputElement = this.element.querySelector('#people') as HTMLInputElement;
         this.configure();
-        this.attach();
-       
     }
+
+     configure() {
+        //bind() >> 나중에 이 함수가 실행될 때 어떻게 실행될지 미리 설정하는 방법 
+        //this >> 클래스를 참조 하고 bind() 때문에 submitHandler() 안의 클래스도 참조할 수 있음. 
+        //decorator 사용해서 autobind 만들기 
+        this.element.addEventListener('submit', this.submitHandler)
+    }
+    renderContent() {}
+
 
     private getherUserInput(): [string , string , number] | void {
         const enteredTitle = this.titleInputElement.value;
@@ -257,16 +297,9 @@ class ProjectInput {
         }
         
     } 
-    private configure() {
-        //bind() >> 나중에 이 함수가 실행될 때 어떻게 실행될지 미리 설정하는 방법 
-        //this >> 클래스를 참조 하고 bind() 때문에 submitHandler() 안의 클래스도 참조할 수 있음. 
-        //decorator 사용해서 autobind 만들기 
-        this.element.addEventListener('submit', this.submitHandler)
-    }
 
-    private attach() {
-        this.hostElement.insertAdjacentElement('afterbegin', this.element);
-    }
+
+
 }
 
 const prjInput = new ProjectInput();
